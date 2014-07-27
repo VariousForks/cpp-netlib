@@ -6,6 +6,7 @@
 cmake_minimum_required(VERSION 2.8)
 project(CPP-NETLIB)
 
+option( BUILD_TESTS "Build tests?" OFF )
 option( CPP-NETLIB_BUILD_SHARED_LIBS "Build cpp-netlib as shared libraries." OFF )
 
 include(GNUInstallDirs)
@@ -37,7 +38,7 @@ else()
 endif()
 
 set(Boost_USE_MULTI_THREADED ON)
-find_package( Boost 1.54.0
+find_package( Boost 1.53.0
     REQUIRED unit_test_framework system regex date_time thread filesystem
     program_options chrono atomic )
 find_package( OpenSSL )
@@ -80,14 +81,18 @@ if (Boost_FOUND)
       add_definitions(-D_WIN32_WINNT=0x0501)
     endif(WIN32)
     include_directories(${Boost_INCLUDE_DIRS})
-    enable_testing()
+    if(BUILD_TESTS)
+      enable_testing()
+    endif(BUILD_TESTS)
     add_subdirectory(libs/network/src)
-    add_subdirectory(libs/network/test)
-    add_subdirectory(libs/network/experiment)
-    if (NOT MSVC)
-      add_subdirectory(libs/mime/test)
-    endif(NOT MSVC)
-    add_subdirectory(libs/network/example)
+    if(BUILD_TESTS)
+      add_subdirectory(libs/network/test)
+      add_subdirectory(libs/network/experiment)
+      if (NOT MSVC)
+        add_subdirectory(libs/mime/test)
+      endif(NOT MSVC)
+      add_subdirectory(libs/network/example)
+    endif(BUILD_TESTS)
 endif(Boost_FOUND)
 
 if (MSVC)
