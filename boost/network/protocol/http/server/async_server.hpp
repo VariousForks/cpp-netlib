@@ -6,6 +6,7 @@
 // (See accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 
+#include <boost/asio/ssl.hpp>
 #include <boost/network/detail/debug.hpp>
 #include <boost/network/protocol/http/server/async_connection.hpp>
 #include <boost/thread/mutex.hpp>
@@ -38,6 +39,23 @@ namespace boost { namespace network { namespace http {
         , listening_mutex_()
         , stopping_mutex_()
         , listening(false)
+        {}
+
+        explicit async_server_base(server_options<Tag, Handler> const &options,
+                                   boost::asio::ssl::context &ssl_context_)
+            : server_storage_base(options)
+            , socket_options_base(options)
+            , handler(options.handler())
+            , address_(options.address())
+            , port_(options.port())
+            , thread_pool(options.thread_pool() ? options.thread_pool() : boost::make_shared<utils::thread_pool>())
+            , acceptor(server_storage_base::service_)
+            , stopping(false)
+            , new_connection()
+            , listening_mutex_()
+            , stopping_mutex_()
+            , listening(false)
+            , ssl_context(ssl_context_)
         {}
 
         void run() {
@@ -79,6 +97,7 @@ namespace boost { namespace network { namespace http {
         boost::mutex listening_mutex_;
         boost::mutex stopping_mutex_;
         bool listening;
+        boost::optional<boost::asio::ssl::context &> ssl_context;
     
         void handle_stop() {
             scoped_mutex_lock stopping_lock(stopping_mutex_);
@@ -99,7 +118,7 @@ namespace boost { namespace network { namespace http {
             socket_options_base::socket_options(new_connection->socket());
             new_connection->start();
             new_connection.reset(
-                new connection(service_, handler, *thread_pool));
+                new connection(service_, handler, *thread_pool, *ssl_context));
             acceptor.async_accept(
                 new_connection->socket(),
                 boost::bind(&async_server_base<Tag, Handler>::handle_accept,
@@ -135,7 +154,7 @@ namespace boost { namespace network { namespace http {
                 BOOST_NETWORK_MESSAGE("Error listening on socket: '" << error << "' on " << address_ << ":" << port_);
                 return;
             }
-            new_connection.reset(new connection(service_, handler, *thread_pool));
+            new_connection.reset(new connection(service_, handler, *thread_pool, *ssl_context));
             acceptor.async_accept(new_connection->socket(),
                 boost::bind(
                     &async_server_base<Tag,Handler>::handle_accept

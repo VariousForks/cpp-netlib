@@ -54,6 +54,10 @@ namespace boost { namespace network { namespace http {
 
         explicit async_server(options const &options)
         : server_base(options) {}
+
+        explicit async_server(options const &options,
+                              boost::asio::ssl::context &context)
+        : server_base(options, context) {}
     };
 
 } // namespace http
@@ -63,4 +67,3 @@ namespace boost { namespace network { namespace http {
 } // namespace boost
 
 #endif // BOOST_NETWORK_HTTP_SERVER_HPP_
-

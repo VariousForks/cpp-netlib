@@ -149,8 +149,9 @@ namespace boost { namespace network { namespace http {
             asio::io_service & io_service
             , Handler & handler
             , utils::thread_pool & thread_pool
+            , boost::asio::ssl::context & ssl_context
             )
-        : socket_(io_service)
+        : ssl_socket_(io_service, ssl_context)
         , strand(io_service)
         , handler(handler)
         , thread_pool_(thread_pool)
@@ -163,7 +164,8 @@ namespace boost { namespace network { namespace http {
 
         ~async_connection() throw () {
             boost::system::error_code ignored;
-            socket_.shutdown(asio::ip::tcp::socket::shutdown_receive, ignored);
+            ssl_socket_.shutdown(ignored);
+            socket().shutdown(boost::asio::ip::tcp::socket::shutdown_receive, ignored);
         }
 
         /** Function: template <class Range> set_headers(Range headers)
@@ -275,7 +277,7 @@ namespace boost { namespace network { namespace http {
                 return;
             }
 
-            socket().async_read_some(
+            ssl_socket_.async_read_some(
                 asio::buffer(read_buffer_)
                 , strand.wrap(
                     boost::bind(
@@ -285,7 +287,7 @@ namespace boost { namespace network { namespace http {
                         , asio::placeholders::error, asio::placeholders::bytes_transferred)));
         }
 
-        asio::ip::tcp::socket & socket()    { return socket_;               }
+        boost::asio::ip::tcp::socket & socket() { return ssl_socket_.next_layer(); }
         utils::thread_pool & thread_pool()  { return thread_pool_;          }
         bool has_error()                    { return (!!error_encountered); }
         optional<boost::system::system_error> error()
@@ -319,7 +321,11 @@ namespace boost { namespace network { namespace http {
         typedef boost::lock_guard<boost::recursive_mutex> lock_guard;
         typedef std::list<boost::function<void()> > pending_actions_list;
 
-        asio::ip::tcp::socket socket_;
+        typedef boost::asio::ssl::stream<
+            boost::asio::ip::tcp::socket> ssl_socket;
+
+        ssl_socket ssl_socket_;
+        // asio::ip::tcp::socket socket_;
         asio::io_service::strand strand;
         Handler & handler;
         utils::thread_pool & thread_pool_;
@@ -343,15 +349,27 @@ namespace boost { namespace network { namespace http {
         };
 
         void start() {
+            ssl_socket_.async_handshake(
+                boost::asio::ssl::stream_base::server,
+                boost::bind(&async_connection<Tag,Handler>::handle_handshake,
+                            async_connection<Tag,Handler>::shared_from_this(),
+                            boost::asio::placeholders::error));
+        }
+
+        void handle_handshake(boost::system::error_code const & ec) {
+            if (!ec) {
             typename ostringstream<Tag>::type ip_stream;
-            ip_stream << socket_.remote_endpoint().address().to_v4().to_string() << ':'
-                << socket_.remote_endpoint().port();
+                ip_stream << socket().remote_endpoint().address().to_v4().to_string() << ':'
+                          << socket().remote_endpoint().port();
             request_.source = ip_stream.str();
             read_more(method);
+            } else {
+                error_encountered = in_place<boost::system::system_error>(ec);
+            }
         }
 
         void read_more(state_t state) {
-            socket_.async_read_some(
+            ssl_socket_.async_read_some(
                 asio::buffer(read_buffer_)
                 , strand.wrap(
                     boost::bind(
@@ -488,7 +506,7 @@ namespace boost { namespace network { namespace http {
                 "HTTP/1.0 400 Bad Request\r\nConnection: close\r\nContent-Type: text/plain\r\nContent-Length: 12\r\n\r\nBad Request.";
 
             asio::async_write(
-                socket()
+                ssl_socket_
                 , asio::buffer(bad_request, strlen(bad_request))
                 , strand.wrap(
                     boost::bind(
@@ -501,6 +519,7 @@ namespace boost { namespace network { namespace http {
         void client_error_sent(boost::system::error_code const & ec, std::size_t bytes_transferred) {
             if (!ec) {
                 boost::system::error_code ignored;
+                ssl_socket_.shutdown(ignored);
                 socket().shutdown(asio::ip::tcp::socket::shutdown_both, ignored);
                 socket().close(ignored);
             } else {
@@ -514,7 +533,7 @@ namespace boost { namespace network { namespace http {
             if (headers_in_progress) return;
             headers_in_progress = true;
             asio::async_write(
-                socket()
+                ssl_socket_
                 , headers_buffer
                 , strand.wrap(
                     boost::bind(
@@ -633,7 +652,7 @@ namespace boost { namespace network { namespace http {
             }
 
             asio::async_write(
-                 socket_
+                 ssl_socket_
                 ,seq
                 ,boost::bind(
                     &async_connection<Tag,Handler>::handle_write
@@ -654,4 +673,3 @@ namespace boost { namespace network { namespace http {
 } /* boost */
 
 #endif /* BOOST_NETWORK_PROTOCOL_HTTP_SERVER_CONNECTION_HPP_20101027 */
-
